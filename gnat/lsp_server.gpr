@@ -19,6 +19,7 @@ with "libadalang";
 with "lal_tools.gpr";
 
 with "lsp";
+with "spawn";
 
 project LSP_Server is
 

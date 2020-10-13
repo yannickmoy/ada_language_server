@@ -6,6 +6,8 @@ with LSP.Common;
 with LSP.Types;         use LSP.Types;
 with LSP.Predefined_Completion.Ada2012;
 
+with VSS.Strings.Conversions;
+
 package body LSP.Predefined_Completion is
 
    Aspects          : CompletionItem_Vector;
@@ -126,6 +128,8 @@ package body LSP.Predefined_Completion is
    procedure Load_Predefined_Completion_Db (Trace : Trace_Handle) is
       Version  : Ada_Version_Type := Ada_2012;
       GNATmake_Exe : constant Virtual_File := Locate_On_Path ("gnatmake");
+      Args         : constant VSS.Strings.Virtual_String :=
+        VSS.Strings.To_Virtual_String ("--help");
    begin
       --  Check "gnatmake --help" output to determine which database we should
       --  use for predefined completion items, depending on the compiler's
@@ -133,10 +137,10 @@ package body LSP.Predefined_Completion is
 
       if GNATmake_Exe /= No_File then
          declare
-            GNATmake_Help_Arg : aliased String := "--help";
             GNATmake_Help     : constant String := LSP.Common.Get_Output
-                 (Exe  => GNATmake_Exe,
-                  Args => (1 => GNATmake_Help_Arg'Unrestricted_Access));
+              (Exe  => VSS.Strings.Conversions.To_Virtual_String
+                (GNATmake_Exe.Display_Full_Name),
+               Args => Args.Split_Lines);
          begin
             if Index (GNATmake_Help, "gnat20") /= 0 then
                Version := Ada_2020;

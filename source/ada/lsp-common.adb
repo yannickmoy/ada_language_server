@@ -17,13 +17,21 @@
 
 with Ada.Characters.Handling;
 with Ada.Exceptions;           use Ada.Exceptions;
-with GNAT.Expect.TTY;
+with Ada.Streams;
+with Ada.Strings.Unbounded;
+
 with GNAT.Strings;
 with GNAT.Traceback.Symbolic;  use GNAT.Traceback.Symbolic;
 with GNATCOLL.Utils;           use GNATCOLL.Utils;
 
 with Langkit_Support.Text;
 with Libadalang.Common;        use Libadalang.Common;
+
+with Spawn.Processes;
+with Spawn.String_Vectors;
+with Spawn.Processes.Monitor_Loop;
+
+with VSS.Strings.Conversions;
 
 package body LSP.Common is
 
@@ -54,36 +62,88 @@ package body LSP.Common is
    ----------------
 
    function Get_Output
-     (Exe  : Virtual_File;
-      Args : GNAT.OS_Lib.Argument_List) return String
+     (Exe  : VSS.Strings.Virtual_String;
+      Args : VSS.String_Vectors.Virtual_String_Vector) return String
    is
-   begin
-      if Exe = No_File then
-         return "";
-      end if;
+      type Listener is new Spawn.Processes.Process_Listener with record
+         Done   : Boolean := False;
+         Buffer : Ada.Strings.Unbounded.Unbounded_String;
+      end record;
 
-      declare
-         Fd : aliased GNAT.Expect.TTY.TTY_Process_Descriptor;
+      overriding procedure Standard_Output_Available (Self : in out Listener);
+
+      overriding procedure Finished
+        (Self      : in out Listener;
+         Exit_Code : Integer);
+
+      overriding procedure Error_Occurred
+        (Self          : in out Listener;
+         Process_Error : Integer);
+
+      --------------------
+      -- Error_Occurred --
+      --------------------
+
+      overriding procedure Error_Occurred
+        (Self          : in out Listener;
+         Process_Error : Integer) is
       begin
-         GNAT.Expect.Non_Blocking_Spawn
-           (Descriptor  => Fd,
-            Command     => Exe.Display_Full_Name,
-            Buffer_Size => 0,
-            Args        => Args,
-            Err_To_Out  => True);
-         declare
-            S : constant String :=
-              GNATCOLL.Utils.Get_Command_Output (Fd'Access);
-         begin
-            GNAT.Expect.TTY.Close (Fd);
+         Self.Done := True;
+      end Error_Occurred;
 
-            return S;
-         end;
-      exception
-         when GNAT.Expect.Process_Died =>
-            GNAT.Expect.TTY.Close (Fd);
-            return "";
-      end;
+      --------------
+      -- Finished --
+      --------------
+
+      overriding procedure Finished
+        (Self      : in out Listener;
+         Exit_Code : Integer) is
+      begin
+         Self.Done := True;
+      end Finished;
+
+      Process : Spawn.Processes.Process;
+
+      -------------------------------
+      -- Standard_Output_Available --
+      -------------------------------
+
+      overriding procedure Standard_Output_Available
+        (Self : in out Listener)
+      is
+         use type Ada.Streams.Stream_Element_Count;
+         Buffer : Ada.Streams.Stream_Element_Array (1 .. 512);
+         Last   : Ada.Streams.Stream_Element_Count;
+      begin
+         loop
+            Process.Read_Standard_Output (Buffer, Last);
+            exit when Last = 0;
+
+            for Item of Buffer (1 .. Last) loop
+               Ada.Strings.Unbounded.Append
+                 (Self.Buffer, Character'Val (Item));
+            end loop;
+         end loop;
+      end Standard_Output_Available;
+
+      Output  : aliased Listener;
+      List    : Spawn.String_Vectors.UTF_8_String_Vector;
+   begin
+      for J in 1 .. Args.Length loop
+         List.Append
+           (VSS.Strings.Conversions.To_UTF_8_String (Args (J)));
+      end loop;
+
+      Process.Set_Arguments (List);
+      Process.Set_Program (VSS.Strings.Conversions.To_UTF_8_String (Exe));
+      Process.Set_Listener (Output'Unchecked_Access);
+      Process.Start;
+
+      while not Output.Done loop
+         Spawn.Processes.Monitor_Loop (Timeout => 100);
+      end loop;
+
+      return Ada.Strings.Unbounded.To_String (Output.Buffer);
    end Get_Output;
 
    -----------------------------
