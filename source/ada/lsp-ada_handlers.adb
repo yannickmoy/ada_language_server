@@ -57,6 +57,7 @@ with LSP.Ada_Handlers.Refactor_Imports_Commands;
 with LSP.Ada_Handlers.Refactor_Move_Parameter;
 with LSP.Ada_Handlers.Refactor_Remove_Parameter;
 with LSP.Ada_Handlers.Refactor_Suppress_Seperate;
+with LSP.Ada_Handlers.Refactor_Pull_Up_Declaration;
 with LSP.Ada_Handlers.Project_Diagnostics;
 with LSP.Ada_Project_Environments;
 with LSP.Client_Side_File_Monitors;
@@ -81,6 +82,7 @@ with Laltools.Refactor.Subprogram_Signature;
 with Laltools.Refactor.Safe_Rename;
 with Laltools.Refactor.Suppress_Separate;
 with Laltools.Refactor.Extract_Subprogram;
+with Laltools.Refactor.Pull_Up_Declaration;
 
 with Libadalang.Analysis;
 with Libadalang.Common;    use Libadalang.Common;
@@ -1303,6 +1305,10 @@ package body LSP.Ada_Handlers is
          --  Checks if the Extract Subprogram refactoring tool is available,
          --  and if so, appends a Code Action with its Command.
 
+         procedure Pull_Up_Declaration_Code_Action;
+         --  Checks if the Pull Up Declaration refactoring tool is available,
+         --  and if so, appends a Code Action with its Command.
+
          ------------------------------------
          -- Extract_Subprogram_Code_Action --
          ------------------------------------
@@ -1362,6 +1368,49 @@ package body LSP.Ada_Handlers is
                end if;
             end if;
          end Extract_Subprogram_Code_Action;
+
+         -------------------------------------
+         -- Pull_Up_Declaration_Code_Action --
+         -------------------------------------
+
+         procedure Pull_Up_Declaration_Code_Action is
+            use LSP.Ada_Handlers.Refactor_Pull_Up_Declaration;
+            use Libadalang.Analysis;
+            use Laltools.Refactor.Pull_Up_Declaration;
+            use Langkit_Support.Slocs;
+            use type LSP.Messages.Position;
+
+            --  This code action is not available when a range of text is
+            --  selected.
+
+            Single_Location             : constant Boolean :=
+              Params.span.first = Params.span.last;
+            Location                    : constant Source_Location :=
+              (if Single_Location then
+                 (Langkit_Support.Slocs.Line_Number
+                      (Params.span.first.line) + 1,
+                  Column_Number (Params.span.first.character) + 1)
+               else
+                  No_Source_Location);
+
+            Extract_Declaration_Command : Command;
+
+         begin
+            if Single_Location
+              and then Is_Pull_Up_Declaration_Available (Node.Unit, Location)
+            then
+               Extract_Declaration_Command.Append_Code_Action
+                 (Context                     => Context,
+                  Commands_Vector             => Result,
+                  Where                       =>
+                    (Params.textDocument.uri,
+                     Params.span,
+                     LSP.Messages.Empty_Set));
+
+               Found := True;
+               Done := True;
+            end if;
+         end Pull_Up_Declaration_Code_Action;
 
       begin
          case Kind is
@@ -1474,6 +1523,9 @@ package body LSP.Ada_Handlers is
 
          --  Extract Subprogram
          Extract_Subprogram_Code_Action;
+
+         --  Pull Up Declaration
+         Pull_Up_Declaration_Code_Action;
 
          --  Add Parameter
          --  This refactoring is only available for clients that can provide
